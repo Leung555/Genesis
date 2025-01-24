@@ -5,8 +5,8 @@ gs.init(backend=gs.cuda)
 scene = gs.Scene(show_viewer=True)
 plane = scene.add_entity(gs.morphs.Plane())
 
-go2 = scene.add_entity(
-    gs.morphs.URDF(file='urdf/go2/urdf/go2.urdf'),
+go2w = scene.add_entity(
+    gs.morphs.URDF(file='/home/binggwong/git/Genesis/genesis/assets/urdf/go2w_description/urdf/go2w.urdf'),
 )
 
 cam_0 = scene.add_camera()
