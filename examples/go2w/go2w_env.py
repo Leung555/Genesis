@@ -118,10 +118,15 @@ class Go2WEnv:
         self.commands[envs_idx, 2] = gs_rand_float(*self.command_cfg["ang_vel_range"], (len(envs_idx),), self.device)
 
     def step(self, actions):
-        self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
+        self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"]) # actions: [num_envs, num_action]
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
-        target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
-        self.robot.control_dofs_position(target_dof_pos, self.motor_dofs)
+        # print('default_pos: ', self.default_dof_pos.shape)
+        target_dof_pos = exec_actions[:, :-4] * self.env_cfg["action_scale"] + self.default_dof_pos[:-4]
+        target_dof_vel = exec_actions[:, -4:] * self.env_cfg["action_scale"]
+        # print('pos: ', target_dof_pos.shape)
+        # print('vel: ', target_dof_vel.shape)
+        self.robot.control_dofs_position(target_dof_pos, self.motor_dofs[:-4])
+        self.robot.control_dofs_velocity(target_dof_vel, self.motor_dofs[-4:])
         self.scene.step()
 
         # update buffers
@@ -170,9 +175,9 @@ class Go2WEnv:
                 self.base_ang_vel * self.obs_scales["ang_vel"],  # 3
                 self.projected_gravity,  # 3
                 self.commands * self.commands_scale,  # 3
-                (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
-                self.dof_vel * self.obs_scales["dof_vel"],  # 12
-                self.actions,  # 12
+                (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12-->16
+                self.dof_vel * self.obs_scales["dof_vel"],  # 12-->16
+                self.actions,  # 12-->16
             ],
             axis=-1,
         )

@@ -92,22 +92,50 @@ print('dofs_len: ', dofs_len)
 speed = 4
 wheel_speed_arr = [speed] * 4
 
+# enter IPython's interactive mode
+# import IPython; IPython.embed()
+
 ########################## build ##########################
 scene.build()
 
+############ Optional: set control gains ############
+# set positional gains
+kp_ = 300
+kv_ = 30
+go2w.set_dofs_kp(
+    kp             = np.array([kp_, kp_, kp_, kp_,  
+                                kp_, kp_, kp_, kp_, 
+                                kp_, kp_, kp_, kp_,
+                                 kp_, kp_, kp_, kp_,]),
+    dofs_idx_local = dofs_idx,
+)
+# set velocity gains
+go2w.set_dofs_kv(
+    kv             = np.array([kv_, kv_, kv_, kv_,  
+                                kv_, kv_, kv_, kv_, 
+                                kv_, kv_, kv_, kv_,
+                                 kv_, kv_, kv_, kv_,]),
+    dofs_idx_local = dofs_idx,
+)
+# set force range for safety
+# go2w.set_dofs_force_range(
+#     lower          = np.array([-87, -87, -87, -87, -12, -12, -12, -100, -100]),
+#     upper          = np.array([ 87,  87,  87,  87,  12,  12,  12,  100,  100]),
+#     dofs_idx_local = dofs_idx,
+# )
 
-# Static posture
-for i in range(250):
-    go2w.control_dofs_position(
-        np.array(list(default_joint_angles.values()))[:-4],
-        dofs_idx[:-4],
-    )
-    go2w.control_dofs_velocity(
-        np.array(wheel_speed_arr),
-        dofs_idx[-4:],
-    )
+# # Static posture
+# for i in range(250):
+#     go2w.control_dofs_position(
+#         np.array(list(default_joint_angles.values()))[:-4],
+#         dofs_idx[:-4],
+#     )
+#     go2w.control_dofs_velocity(
+#         np.array(wheel_speed_arr),
+#         dofs_idx[-4:],
+#     )
 
-for i in range(600):
+for i in range(-200, 600):
     if i == 0:
         sp = 10
         wheel_speed_arr = [sp] * 4

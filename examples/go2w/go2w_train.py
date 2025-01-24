@@ -58,7 +58,7 @@ def get_train_cfg(exp_name, max_iterations):
 
 def get_cfgs():
     env_cfg = {
-        "num_actions": 12,
+        "num_actions": 16,
         # joint/link names
         "default_joint_angles": {  # [rad]
             "FL_hip_joint": 0.0,
@@ -97,8 +97,8 @@ def get_cfgs():
             "RL_foot_joint",
         ],
         # PD
-        "kp": 20.0,
-        "kd": 0.5,
+        "kp": 100.0, # 20.0,
+        "kd": 10.0, # 0.5,
         # termination
         "termination_if_roll_greater_than": 10,  # degree
         "termination_if_pitch_greater_than": 10,
@@ -112,7 +112,7 @@ def get_cfgs():
         "clip_actions": 100.0,
     }
     obs_cfg = {
-        "num_obs": 45,
+        "num_obs": 57, #Go2 (45) --> Go2w (45+4+4+4=54)
         "obs_scales": {
             "lin_vel": 2.0,
             "ang_vel": 0.25,
@@ -145,7 +145,7 @@ def get_cfgs():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
+    parser.add_argument("-e", "--exp_name", type=str, default="go2w-walking")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
