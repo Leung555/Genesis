@@ -1,6 +1,48 @@
 import numpy as np
 import genesis as gs
 
+# Define the translation matrix for z-axis translation by 0.1 units
+def translate_z(units):
+    return np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, units],
+        [0, 0, 0, 1]
+    ])
+
+# Define the rotation matrix for z-axis rotation by -90 degrees
+def rotate_z(degrees):
+    radians = np.radians(degrees)
+    c, s = np.cos(radians), np.sin(radians)
+    return np.array([
+        [c, -s, 0, 0],
+        [s, c, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ])
+
+# Define the rotation matrix for y-axis rotation by 90 degrees
+def rotate_y(degrees):
+    radians = np.radians(degrees)
+    c, s = np.cos(radians), np.sin(radians)
+    return np.array([
+        [c, 0, s, 0],
+        [0, 1, 0, 0],
+        [-s, 0, c, 0],
+        [0, 0, 0, 1]
+    ])
+
+# Define the rotation matrix for x-axis rotation by 90 degrees
+def rotate_x(degrees):
+    radians = np.radians(degrees)
+    c, s = np.cos(radians), np.sin(radians)
+    return np.array([
+        [1, 0, 0, 0],
+        [0, c, -s, 0],
+        [0, s, c, 0],
+        [0, 0, 0, 1]
+    ])
+
 def command_action(robot, pos_arr, vel_arr):
     robot.control_dofs_position(
         np.array(list(pos_arr.values()))[:-4],
@@ -42,6 +84,13 @@ scene = gs.Scene(
 ########################## entities ##########################
 plane = scene.add_entity(
     gs.morphs.Plane(),
+)
+
+sphere = scene.add_entity(
+    gs.morphs.Sphere(
+        pos=(1.5,0,0.6),
+        radius=0.3,
+    )
 )
 
 # when loading an entity, you can specify its pose in the morph.
@@ -88,12 +137,22 @@ wheel_speed_arr = [speed] * 4
 
 ###################### camera ######################
 cam = scene.add_camera(
-    res    = (3, 3),
+    res    = (50, 50),
     pos    = (3.5, 0.0, 2.5),
-    lookat = (0, 0, 0.5),
-    fov    = 30,
+    fov    = 60,
     GUI    = True
 )
+
+# Combine the transformations
+T_translate = translate_z(0.1)
+T_rotate_z = rotate_z(-90)
+T_rotate_y = rotate_y(90)
+T_rotate_x = rotate_x(90)
+
+# The final transformation matrix
+T_final = T_translate @ T_rotate_z @ T_rotate_x # @ T_rotate_x
+
+
 
 # enter IPython's interactive mode
 # import IPython; IPython.embed()
@@ -101,10 +160,7 @@ cam = scene.add_camera(
 ########################## build ##########################
 scene.build()
 
-cam.attach(base, [[0,0,0,0],
-                  [0,0,0,0],
-                  [0,0,0,0],
-                  [0,0,0,0]])
+cam.attach(base, T_final)
 
 # render rgb, depth, segmentation mask and normal map
 # rgb, depth, segmentation, normal = cam.render(depth=False, segmentation=False, normal=False)
@@ -130,25 +186,25 @@ cam.attach(base, [[0,0,0,0],
 #     dofs_idx_local = dofs_idx,
 # )
 
-for i in range(-200, 600):
-    # if i == 0:
-    #     sp = 10
-    #     wheel_speed_arr = [sp] * 4
-    #     command_action(go2w, default_joint_angles, wheel_speed_arr)
-    # elif i == 150:
-    #     sp = -10
-    #     wheel_speed_arr = [sp] * 4
-    #     command_action(go2w, default_joint_angles, wheel_speed_arr)
+for i in range(-100, 600):
+    if i == 0:
+        sp = 10
+        wheel_speed_arr = [sp] * 4
+        command_action(go2w, default_joint_angles, wheel_speed_arr)
+    elif i == 150:
+        sp = -10
+        wheel_speed_arr = [sp] * 4
+        command_action(go2w, default_joint_angles, wheel_speed_arr)
 
-    # elif i == 300:
-    #     sp = 3
-    #     wheel_speed_arr = [sp, -sp, sp , -sp]
-    #     command_action(go2w, default_joint_angles, wheel_speed_arr)
+    elif i == 300:
+        sp = 3
+        wheel_speed_arr = [sp, -sp, sp , -sp]
+        command_action(go2w, default_joint_angles, wheel_speed_arr)
 
-    # elif i == 450:
-    #     sp = 3
-    #     wheel_speed_arr = [-sp, sp, -sp, sp]
-    #     command_action(go2w, default_joint_angles, wheel_speed_arr)
+    elif i == 450:
+        sp = 3
+        wheel_speed_arr = [-sp, sp, -sp, sp]
+        command_action(go2w, default_joint_angles, wheel_speed_arr)
 
     scene.step()
 

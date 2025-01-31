@@ -2,7 +2,7 @@ import genesis as gs
 
 gs.init(backend=gs.cuda)
 
-scene = gs.Scene(show_viewer=True)
+scene = gs.Scene(show_viewer=False)
 plane = scene.add_entity(gs.morphs.Plane())
 
 go2w = scene.add_entity(
