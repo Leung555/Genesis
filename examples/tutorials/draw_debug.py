@@ -4,7 +4,7 @@ import genesis as gs
 
 
 def main():
-    gs.init(backend=gs.cpu)
+    gs.init(backend=gs.cuda)
 
     # Scene setup
     viewer_options = gs.options.ViewerOptions(
