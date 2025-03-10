@@ -1,0 +1,457 @@
+"""
+MuJoCo LLM Integration Project
+
+This project integrates a local LLM with MuJoCo simulation to enable
+natural language control of a robot arm and environment objects.
+"""
+
+import os
+import time
+import numpy as np
+import mujoco
+import mujoco_viewer
+import re
+from typing import List, Dict, Tuple, Optional, Any
+from dataclasses import dataclass
+
+# Import for local LLM integration
+import ctransformers
+from ctransformers import AutoModelForCausalLM
+
+@dataclass
+class Object:
+    """Class to represent objects in the simulation"""
+    name: str
+    type: str
+    position: np.ndarray
+    size: np.ndarray
+    color: np.ndarray
+
+class MuJocoLLMEnvironment:
+    """Environment that combines MuJoCo simulation with LLM-based control"""
+    
+    def __init__(self, model_path: str = "llama-2-7b-chat.gguf", 
+                 robot_type: str = "arm", 
+                 initial_objects: List[Object] = None):
+        """
+        Initialize the MuJoCo environment with LLM integration
+        
+        Args:
+            model_path: Path to the local LLM model
+            robot_type: Type of robot to simulate ("arm" or "mobile")
+            initial_objects: List of objects to add to the environment initially
+        """
+        self.load_llm(model_path)
+        self.initialize_simulation(robot_type)
+        self.objects = initial_objects or []
+        self.initialize_objects()
+        
+    def load_llm(self, model_path: str):
+        """Load the local LLM model"""
+        print(f"Loading LLM from {model_path}...")
+        
+        try:
+            self.llm = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                model_type="llama",
+                context_length=2048,
+                max_new_tokens=512,
+                temperature=0.1
+            )
+            print("LLM loaded successfully")
+        except Exception as e:
+            print(f"Failed to load LLM: {e}")
+            print("Creating dummy LLM for testing purposes")
+            self.llm = None
+            
+    def initialize_simulation(self, robot_type: str):
+        """Initialize the MuJoCo simulation with specified robot type"""
+        if robot_type == "arm":
+            xml = self._create_arm_xml()
+        else:
+            xml = self._create_mobile_robot_xml()
+            
+        # Load model from XML string
+        self.model = mujoco.MjModel.from_xml_string(xml)
+        self.data = mujoco.MjData(self.model)
+        
+        # Create viewer
+        self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
+        
+        # Set initial properties
+        self.step_size = 0.01
+        print(f"MuJoCo simulation initialized with {robot_type} robot")
+        
+    def initialize_objects(self):
+        """Add initial objects to the simulation"""
+        for obj in self.objects:
+            self.add_object(obj)
+    
+    def _create_arm_xml(self) -> str:
+        """Create XML for a robot arm simulation"""
+        return """
+        <mujoco>
+            <option gravity="0 0 -9.81" />
+            
+            <worldbody>
+                <light diffuse=".5 .5 .5" pos="0 0 3" dir="0 0 -1"/>
+                <geom type="plane" size="10 10 0.1" rgba="0.3 0.3 0.3 1"/>
+                
+                <!-- Robot arm base -->
+                <body name="base" pos="0 0 0">
+                    <joint type="free"/>
+                    <geom type="cylinder" size="0.2 0.05" rgba="0.2 0.2 0.2 1"/>
+                    
+                    <!-- First link -->
+                    <body name="link1" pos="0 0 0.05">
+                        <joint name="joint1" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+                        <geom type="cylinder" size="0.05 0.4" pos="0 0 0.4" rgba="0.7 0.7 0 1"/>
+                        
+                        <!-- Second link -->
+                        <body name="link2" pos="0 0 0.8">
+                            <joint name="joint2" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
+                            <geom type="cylinder" size="0.05 0.4" pos="0 0 0.4" rgba="0 0.7 0.7 1"/>
+                            
+                            <!-- Third link (end effector) -->
+                            <body name="link3" pos="0 0 0.8">
+                                <joint name="joint3" type="hinge" axis="0 1 0" range="-1.57 1.57"/>
+                                <geom name="end_effector" type="sphere" size="0.1" rgba="0.7 0 0.7 1"/>
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </worldbody>
+            
+            <actuator>
+                <motor joint="joint1" name="motor1" gear="50" ctrllimited="true" ctrlrange="-1 1"/>
+                <motor joint="joint2" name="motor2" gear="50" ctrllimited="true" ctrlrange="-1 1"/>
+                <motor joint="joint3" name="motor3" gear="50" ctrllimited="true" ctrlrange="-1 1"/>
+            </actuator>
+        </mujoco>
+        """
+    
+    def _create_mobile_robot_xml(self) -> str:
+        """Create XML for a mobile robot simulation"""
+        return """
+        <mujoco>
+            <option gravity="0 0 -9.81" />
+            
+            <worldbody>
+                <light diffuse=".5 .5 .5" pos="0 0 3" dir="0 0 -1"/>
+                <geom type="plane" size="10 10 0.1" rgba="0.3 0.3 0.3 1"/>
+                
+                <!-- Mobile robot -->
+                <body name="robot" pos="0 0 0.1">
+                    <joint type="free"/>
+                    <geom type="box" size="0.3 0.2 0.1" rgba="0.2 0.2 0.7 1"/>
+                    
+                    <!-- Wheels -->
+                    <body name="wheel1" pos="0.2 0.2 0">
+                        <joint name="wheel1_joint" type="hinge" axis="0 1 0"/>
+                        <geom type="cylinder" size="0.1 0.02" rgba="0.5 0.5 0.5 1"/>
+                    </body>
+                    
+                    <body name="wheel2" pos="0.2 -0.2 0">
+                        <joint name="wheel2_joint" type="hinge" axis="0 1 0"/>
+                        <geom type="cylinder" size="0.1 0.02" rgba="0.5 0.5 0.5 1"/>
+                    </body>
+                    
+                    <body name="wheel3" pos="-0.2 0.2 0">
+                        <joint name="wheel3_joint" type="hinge" axis="0 1 0"/>
+                        <geom type="cylinder" size="0.1 0.02" rgba="0.5 0.5 0.5 1"/>
+                    </body>
+                    
+                    <body name="wheel4" pos="-0.2 -0.2 0">
+                        <joint name="wheel4_joint" type="hinge" axis="0 1 0"/>
+                        <geom type="cylinder" size="0.1 0.02" rgba="0.5 0.5 0.5 1"/>
+                    </body>
+                </body>
+            </worldbody>
+            
+            <actuator>
+                <motor joint="wheel1_joint" name="motor1" gear="30"/>
+                <motor joint="wheel2_joint" name="motor2" gear="30"/>
+                <motor joint="wheel3_joint" name="motor3" gear="30"/>
+                <motor joint="wheel4_joint" name="motor4" gear="30"/>
+            </actuator>
+        </mujoco>
+        """
+        
+    def add_object(self, obj: Object):
+        """Add an object to the simulation"""
+        # Create XML element for the object
+        if obj.type == "cube":
+            geom_type = "box"
+        elif obj.type == "sphere":
+            geom_type = "sphere"
+        elif obj.type == "cylinder":
+            geom_type = "cylinder"
+        else:
+            print(f"Unknown object type: {obj.type}")
+            return
+            
+        # Get color as string
+        color_str = ' '.join(map(str, obj.color))
+        
+        # Create XML string for the object
+        xml = f"""
+        <body name="{obj.name}" pos="{obj.position[0]} {obj.position[1]} {obj.position[2]}">
+            <joint type="free"/>
+            <geom type="{geom_type}" size="{' '.join(map(str, obj.size))}" rgba="{color_str}"/>
+        </body>
+        """
+        
+        # Add to model (in a real implementation, you would need to modify the XML and reload the model)
+        print(f"Added {obj.type} named '{obj.name}' at position {obj.position}")
+        
+        # Add to objects list
+        self.objects.append(obj)
+        
+    def remove_object(self, name: str):
+        """Remove an object from the simulation by name"""
+        self.objects = [obj for obj in self.objects if obj.name != name]
+        print(f"Removed object '{name}' from simulation")
+        
+    def move_robot(self, position: np.ndarray):
+        """Move the robot to a target position"""
+        if len(position) != 3:
+            print("Position must be a 3D vector [x, y, z]")
+            return
+            
+        print(f"Moving robot to position {position}")
+        
+        # In a real implementation, you would use inverse kinematics or a motion planner
+        # For this example, we'll just set joint positions directly for the arm
+        target_x, target_y, target_z = position
+        
+        # Simple inverse kinematics for demonstration (not accurate)
+        # This would be replaced with proper IK in a real implementation
+        theta1 = np.arctan2(target_y, target_x)
+        
+        # Distance from base to target in x-y plane
+        r = np.sqrt(target_x**2 + target_y**2)
+        
+        # Simple approximation for joint angles 2 and 3
+        distance = np.sqrt(r**2 + (target_z - 0.05)**2)
+        theta2 = np.arcsin((target_z - 0.05) / distance) if distance > 0 else 0
+        theta3 = -theta2 / 2  # Simple approximation
+        
+        # Set joint positions
+        self.data.qpos[0] = theta1
+        self.data.qpos[1] = theta2
+        self.data.qpos[2] = theta3
+        
+        print(f"Set joint angles to [{theta1:.2f}, {theta2:.2f}, {theta3:.2f}]")
+        
+    def parse_command(self, command: str) -> Dict[str, Any]:
+        """
+        Parse a natural language command using the local LLM
+        and extract structured information
+        """
+        if self.llm is None:
+            # Fallback parsing using regular expressions for testing
+            return self._regex_parse_command(command)
+            
+        # Prepare prompt for the LLM
+        prompt = f"""
+        You are a natural language parser for a robot control system.
+        Extract the structured information from the following command.
+        Return the result in a JSON format with action, parameters and any relevant details.
+        
+        Command: "{command}"
+        
+        Valid actions are:
+        - add_object (requires: type, position, size (optional), color (optional))
+        - remove_object (requires: name)
+        - move_robot (requires: position)
+        - query_state (optional: object_name)
+        
+        JSON:
+        """
+        
+        # Get response from LLM
+        response = self.llm(prompt)
+        
+        try:
+            # For a real implementation, parse the JSON response
+            # For now, we'll use the regex fallback
+            return self._regex_parse_command(command)
+        except Exception as e:
+            print(f"Failed to parse LLM response: {e}")
+            return self._regex_parse_command(command)
+            
+    def _regex_parse_command(self, command: str) -> Dict[str, Any]:
+        """Fallback method to parse commands using regex patterns"""
+        command = command.lower()
+        
+        # Pattern for adding objects
+        add_pattern = r"add\s+(\w+)\s+at\s+position\s*\[([^]]+)\]"
+        add_match = re.search(add_pattern, command)
+        if add_match:
+            obj_type = add_match.group(1)
+            pos_str = add_match.group(2)
+            try:
+                position = np.array([float(x.strip()) for x in pos_str.split(',')])
+                
+                # Extract optional size
+                size_match = re.search(r"size\s*\[([^]]+)\]", command)
+                size = np.array([0.1, 0.1, 0.1])  # Default size
+                if size_match:
+                    size = np.array([float(x.strip()) for x in size_match.group(1).split(',')])
+                
+                # Extract optional color
+                color_match = re.search(r"color\s*\[([^]]+)\]", command)
+                color = np.array([0.8, 0.2, 0.2, 1.0])  # Default color (red)
+                if color_match:
+                    color_values = [float(x.strip()) for x in color_match.group(1).split(',')]
+                    # Ensure RGBA format
+                    if len(color_values) == 3:
+                        color_values.append(1.0)  # Add alpha if not provided
+                    color = np.array(color_values)
+                
+                return {
+                    "action": "add_object",
+                    "type": obj_type,
+                    "position": position,
+                    "size": size,
+                    "color": color,
+                    "name": f"{obj_type}_{len(self.objects)}"
+                }
+            except Exception as e:
+                print(f"Error parsing position: {e}")
+        
+        # Pattern for moving robot
+        move_pattern = r"move\s+(?:the\s+)?robot\s+to\s+position\s*\[([^]]+)\]"
+        move_match = re.search(move_pattern, command)
+        if move_match:
+            pos_str = move_match.group(1)
+            try:
+                position = np.array([float(x.strip()) for x in pos_str.split(',')])
+                return {
+                    "action": "move_robot",
+                    "position": position
+                }
+            except Exception as e:
+                print(f"Error parsing position: {e}")
+        
+        # Pattern for removing objects
+        remove_pattern = r"remove\s+(?:the\s+)?(?:object\s+)?(?:named\s+)?['\"]?(\w+)['\"]?"
+        remove_match = re.search(remove_pattern, command)
+        if remove_match:
+            name = remove_match.group(1)
+            return {
+                "action": "remove_object",
+                "name": name
+            }
+            
+        # Query state
+        if "state" in command or "status" in command:
+            obj_name = None
+            obj_match = re.search(r"(?:of|for)\s+['\"]?(\w+)['\"]?", command)
+            if obj_match:
+                obj_name = obj_match.group(1)
+                
+            return {
+                "action": "query_state",
+                "object_name": obj_name
+            }
+            
+        # If no patterns match
+        return {
+            "action": "unknown",
+            "original_command": command
+        }
+        
+    def execute_command(self, command: str) -> str:
+        """Parse and execute a natural language command"""
+        parsed = self.parse_command(command)
+        action = parsed.get("action", "unknown")
+        
+        if action == "add_object":
+            obj = Object(
+                name=parsed["name"],
+                type=parsed["type"],
+                position=parsed["position"],
+                size=parsed["size"],
+                color=parsed["color"]
+            )
+            self.add_object(obj)
+            return f"Added {parsed['type']} at position {parsed['position']}"
+            
+        elif action == "move_robot":
+            self.move_robot(parsed["position"])
+            return f"Moved robot to position {parsed['position']}"
+            
+        elif action == "remove_object":
+            name = parsed["name"]
+            self.remove_object(name)
+            return f"Removed object {name}"
+            
+        elif action == "query_state":
+            obj_name = parsed.get("object_name")
+            if obj_name:
+                matching_objs = [obj for obj in self.objects if obj.name == obj_name]
+                if matching_objs:
+                    obj = matching_objs[0]
+                    return f"Object {obj_name} is at position {obj.position}"
+                else:
+                    return f"No object named {obj_name} found"
+            else:
+                return f"Robot has {len(self.objects)} objects in the environment"
+                
+        else:
+            return f"Unknown command: {command}"
+            
+    def run(self):
+        """Run the interactive simulation loop"""
+        print("\nMuJoCo LLM Robot Control Interface")
+        print("==================================")
+        print("Enter commands to control the robot and environment:")
+        print("- 'add cube at position[x,y,z]'")
+        print("- 'move robot to position[x,y,z]'")
+        print("- 'remove object_name'")
+        print("- 'status' or 'q' to quit")
+        
+        running = True
+        while running and self.viewer.is_alive:
+            # Simulate one step
+            mujoco.mj_step(self.model, self.data)
+            self.viewer.render()
+            
+            # Check for user input (non-blocking)
+            if input_available():
+                command = input("\nEnter command: ")
+                
+                if command.lower() in ['q', 'quit', 'exit']:
+                    running = False
+                    continue
+                    
+                # Process command and get response
+                response = self.execute_command(command)
+                print(response)
+                
+            # Small sleep to prevent high CPU usage
+            time.sleep(self.step_size)
+            
+        # Clean up
+        self.viewer.close()
+        print("Simulation ended")
+
+
+def input_available():
+    """Check if input is available (non-blocking)"""
+    # This is a simplified implementation
+    # In a real project, you would use a more sophisticated approach
+    # such as threading or async IO
+    return True
+
+
+if __name__ == "__main__":
+    # Create environment with default robot arm
+    env = MuJocoLLMEnvironment(
+        model_path="llama-2-7b-chat.gguf",  # Path to your local LLM model
+        robot_type="arm"
+    )
+    
+    # Run the simulation
+    env.run()
